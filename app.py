@@ -1,25 +1,27 @@
 import streamlit as st
+import os
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
+import pickle
 
 
-st.title("RAG Multi-PDF + FAISS Incremental + LangChain + Streamlit 🚀")
-
+st.title("RAG Multi-PDF + FAISS Persistente + LangChain + Streamlit 🚀")
 
 # ============================
-# 1) Carregar chave da API
+# 1) Configuração do LLM
 # ============================
 api_key = st.secrets["OPENAI_API_KEY"]
 
 llm = ChatOpenAI(
     api_key=api_key,
     model="gpt-4o-mini",
-    temperature=0.2
+    temperature=0.2,
 )
+
 
 # ============================
 # 2) Embeddings com cache
@@ -34,13 +36,49 @@ embeddings = load_embeddings()
 
 
 # ============================
-# 3) Estado global do FAISS
+# 3) Caminhos de persistência
 # ============================
-if "vectorstore" not in st.session_state:
-    st.session_state.vectorstore = None
+FAISS_DIR = "faiss_index"
+FAISS_PATH = os.path.join(FAISS_DIR, "index.faiss")
+FAISS_META = os.path.join(FAISS_DIR, "index.pkl")
+
+os.makedirs(FAISS_DIR, exist_ok=True)
+
 
 # ============================
-# 4) Processar PDFs
+# 4) Carregar índice salvo (se existir)
+# ============================
+def load_faiss():
+    if os.path.exists(FAISS_PATH) and os.path.exists(FAISS_META):
+        with open(FAISS_META, "rb") as f:
+            metadata = pickle.load(f)
+        return FAISS.load_local(
+            folder_path=FAISS_DIR,
+            embeddings=embeddings,
+            index_name="index"
+        )
+    return None
+
+
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = load_faiss()
+
+
+# ============================
+# 5) Salvar FAISS no disco
+# ============================
+def save_faiss(vectorstore):
+    vectorstore.save_local(
+        folder_path=FAISS_DIR,
+        index_name="index"
+    )
+    # salvar metadados
+    with open(FAISS_META, "wb") as f:
+        pickle.dump({"info": "faiss-metadata"}, f)
+
+
+# ============================
+# 6) Processamento de PDFs
 # ============================
 def process_pdfs(files):
     all_docs = []
@@ -59,7 +97,6 @@ def process_pdfs(files):
         )
         chunks = splitter.split_documents(docs)
 
-        # Adicionar metadado do nome do pdf
         for c in chunks:
             c.metadata["pdf_name"] = uploaded_file.name
 
@@ -69,19 +106,20 @@ def process_pdfs(files):
 
 
 # ============================
-# 5) Adicionar ao índice FAISS
+# 7) Adicionar PDFs ao índice
 # ============================
-def add_to_vectorstore(docs, embeddings):
-    # Se não existe índice, criamos
+def add_to_vectorstore(docs):
     if st.session_state.vectorstore is None:
         st.session_state.vectorstore = FAISS.from_documents(docs, embeddings)
     else:
-        # Se já existe, só adicionamos novos docs
         st.session_state.vectorstore.add_documents(docs)
+
+    # Persistência
+    save_faiss(st.session_state.vectorstore)
 
 
 # ============================
-# 6) Upload de PDFs
+# 8) Upload de PDFs
 # ============================
 uploaded_files = st.file_uploader(
     "Envie um ou vários PDFs:",
@@ -94,14 +132,14 @@ if uploaded_files:
 
     docs = process_pdfs(uploaded_files)
 
-    st.info("Adicionando ao índice vetorial...")
-    add_to_vectorstore(docs, embeddings)
+    st.info("Atualizando índice persistente...")
+    add_to_vectorstore(docs)
 
-    st.success("PDFs adicionados ao índice com sucesso!")
+    st.success("PDFs salvos e índice atualizado com sucesso! 🔥")
 
 
 # ============================
-# 7) Campo de Pergunta
+# 9) Perguntas
 # ============================
 pergunta = st.text_input("Faça sua pergunta:")
 
