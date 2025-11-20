@@ -6,83 +6,102 @@ from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
-st.title("RAG Multi-PDF + LangChain + Streamlit + GitHub 📚🚀")
+st.title("RAG Multi-PDF Contínuo 📚🚀")
 
+# ============ LLM ============
 api_key = st.secrets["OPENAI_API_KEY"]
 
-# LLM (OpenAI) para gerar respostas
 llm = ChatOpenAI(
     api_key=api_key,
     model="gpt-4o-mini"
 )
 
-# Embeddings locais (sem limite, grátis)
+# ============ Embeddings ============
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-# Upload múltiplo de PDFs
+# Criar vetor na sessão
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+# ============ Upload ============
+
 uploaded_files = st.file_uploader(
-    "Envie um ou vários PDFs para análise:",
+    "Envie PDFs (pode enviar novos a qualquer momento):",
     type=["pdf"],
     accept_multiple_files=True
 )
 
 if uploaded_files:
-    all_documents = []
+    all_docs = []
 
-    for uploaded_file in uploaded_files:
-        # Salvar temporário
-        temp_path = f"temp_{uploaded_file.name}"
+    for uploaded in uploaded_files:
+        temp_path = f"temp_{uploaded.name}"
         with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+            f.write(uploaded.getbuffer())
 
-        st.success(f"{uploaded_file.name} carregado com sucesso!")
-
-        # Carregar o PDF
+        # Ler PDF
         loader = PyPDFLoader(temp_path)
         docs = loader.load()
 
-        # Dividir em chunks
-        text_splitter = RecursiveCharacterTextSplitter(
+        # Chunk
+        splitter = RecursiveCharacterTextSplitter(
             chunk_size=800,
-            chunk_overlap=100
+            chunk_overlap=120
         )
-        docs = text_splitter.split_documents(docs)
+        docs = splitter.split_documents(docs)
 
-        # Adicionar ao conjunto geral
-        all_documents.extend(docs)
+        # Guardar nome do PDF
+        for d in docs:
+            d.metadata["pdf_name"] = uploaded.name
 
-    st.info("Todos os PDFs foram processados. Construindo o índice...")
+        all_docs.extend(docs)
 
-    # Criar FAISS com todos os documentos juntos
-    vectorstore = FAISS.from_documents(all_documents, embeddings)
+        st.success(f"PDF carregado: {uploaded.name}")
 
-    st.success("Todos os PDFs foram indexados! Faça sua pergunta:")
+    # Atualizar o FAISS existente ou criar um novo
+    if st.session_state.vectorstore is None:
+        st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
+    else:
+        st.session_state.vectorstore.add_documents(all_docs)
 
-    pergunta = st.text_input("Faça uma pergunta sobre os PDFs:")
+    st.success("Índice atualizado com novos PDFs! 🔥")
 
-    if st.button("Enviar pergunta"):
-        if pergunta:
-            # Busca nos múltiplos PDFs
-            docs = vectorstore.similarity_search(pergunta, k=4)
+# ============ Pergunta ============
 
-            # Construir contexto
-            contexto = ""
-            for d in docs:
-                contexto += f"\n\n[PDF: {d.metadata.get('source', 'desconhecido')}] ---\n{d.page_content}"
+pergunta = st.text_input("Pergunte algo sobre os PDFs carregados:")
 
-            prompt = f"""
-            Use o contexto abaixo para responder à pergunta.
+if st.button("Enviar pergunta"):
+    if not st.session_state.vectorstore:
+        st.error("Nenhum PDF carregado ainda.")
+    elif not pergunta:
+        st.warning("Digite uma pergunta.")
+    else:
+        docs = st.session_state.vectorstore.similarity_search(pergunta, k=4)
 
-            CONTEXTO:
-            {contexto}
+        contexto = ""
+        for d in docs:
+            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name', 'desconhecido')}] ---\n{d.page_content}"
 
-            PERGUNTA:
-            {pergunta}
-            """
+        prompt = f"""
+Use SOMENTE o contexto abaixo para responder.
 
-            resposta = llm.invoke([HumanMessage(content=prompt)])
-            st.write(resposta.content)
-        else:
-            st.warning("Por favor, digite uma pergunta.")
+CONTEXTO:
+{contexto}
+
+PERGUNTA:
+{pergunta}
+
+RESPOSTA:
+"""
+
+        resposta = llm.invoke([HumanMessage(content=prompt)])
+        st.write(resposta.content)
+
+        st.markdown("---")
+        st.subheader("Trechos usados:")
+
+        for d in docs:
+            st.write(f"📄 **{d.metadata.get('pdf_name')}**")
+            st.write(d.page_content[:400] + "...")
