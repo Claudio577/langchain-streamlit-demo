@@ -2,6 +2,8 @@ import streamlit as st
 import os
 import pickle
 import shutil
+import uuid
+
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -10,7 +12,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 
-st.title("RAG Multi-PDF + FAISS Persistente + Fontes por PDF + Streamlit 🚀")
+st.title("📚 RAG Inteligente PRO — Multi-PDF + Resumo + Explicação + Busca 🔍")
 
 
 # ============================
@@ -48,7 +50,6 @@ META_FILE = os.path.join(FAISS_DIR, "index.pkl")
 
 
 def load_faiss():
-    """Carrega FAISS salvo, se existir."""
     if not os.path.exists(INDEX_FILE) or not os.path.exists(META_FILE):
         return None
 
@@ -60,7 +61,6 @@ def load_faiss():
             allow_dangerous_deserialization=True
         )
     except Exception:
-        st.warning("Índice existente não pôde ser carregado. Será recriado.")
         return None
 
 
@@ -69,14 +69,34 @@ if "vectorstore" not in st.session_state:
 
 
 def save_faiss(store):
-    """Salva FAISS no disco."""
     store.save_local(folder_path=FAISS_DIR, index_name="index")
     with open(META_FILE, "wb") as f:
         pickle.dump({"info": "faiss metadata"}, f)
 
 
 # ============================
-# 4) Processar PDFs
+# 4) Botão de limpeza total
+# ============================
+st.markdown("### 🗑️ Limpar todos os PDFs e reiniciar índice")
+
+if st.button("Apagar todos os PDFs e reiniciar índice"):
+    try:
+        shutil.rmtree(FAISS_DIR)
+        os.makedirs(FAISS_DIR, exist_ok=True)
+
+        st.session_state.vectorstore = None
+
+        st.session_state.uploader_key = str(uuid.uuid4())
+
+        st.success("Todos os PDFs foram apagados e o índice foi reiniciado!")
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Erro ao limpar índice: {e}")
+
+
+# ============================
+# 5) Processar PDFs
 # ============================
 def process_pdfs(files):
     all_docs = []
@@ -90,8 +110,8 @@ def process_pdfs(files):
         docs = loader.load()
 
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=80
+            chunk_size=900,
+            chunk_overlap=100
         )
         chunks = splitter.split_documents(docs)
 
@@ -104,7 +124,7 @@ def process_pdfs(files):
 
 
 # ============================
-# 5) Atualizar índice FAISS
+# 6) Atualizar FAISS
 # ============================
 def add_to_vectorstore(docs):
     if st.session_state.vectorstore is None:
@@ -116,12 +136,13 @@ def add_to_vectorstore(docs):
 
 
 # ============================
-# 6) Upload PDFs
+# 7) Upload de PDFs
 # ============================
 uploaded_files = st.file_uploader(
-    "Envie um ou vários PDFs:",
+    "Envie PDFs:",
     type=["pdf"],
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key=st.session_state.get("uploader_key", "uploader_key")
 )
 
 if uploaded_files:
@@ -131,93 +152,106 @@ if uploaded_files:
     st.info("Atualizando índice persistente...")
     add_to_vectorstore(docs)
 
-    st.success("PDFs adicionados ao índice com sucesso! 🔥")
-st.markdown("### 🗑️ Limpar todos os PDFs e reiniciar índice")
+    st.success("PDFs adicionados com sucesso! 🔥")
 
-if st.button("Apagar todos os PDFs e reiniciar índice"):
-    try:
-        # Apagar pasta do FAISS
-        shutil.rmtree(FAISS_DIR)
-        os.makedirs(FAISS_DIR, exist_ok=True)
-
-        # Resetar FAISS na memória
-        st.session_state.vectorstore = None
-
-        # Resetar o file_uploader (ESSENCIAL)
-        if "file_uploader" in st.session_state:
-            del st.session_state["file_uploader"]
-
-        # Resetar qualquer outra variável de sessão
-        for key in list(st.session_state.keys()):
-            if "uploaded" in key or "file" in key:
-                del st.session_state[key]
-
-        st.success("Todos os PDFs foram apagados e o índice foi reiniciado!")
-
-        # Recarregar tudo
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Erro ao limpar índice: {e}")
 
 # ============================
-# 7) Pergunta
+# 8) UI — Modo Inteligente
 # ============================
-pergunta = st.text_input("Faça sua pergunta:")
+modo = st.radio(
+    "Escolha o modo de resposta:",
+    ["📄 Resumo do PDF", "💡 Explicar / Interpretar PDF", "🔍 Perguntas específicas (RAG)"]
+)
+
+pergunta = st.text_input("Digite sua pergunta:")
 
 if st.button("Enviar pergunta"):
     if not pergunta:
-        st.warning("Digite uma pergunta.")
+        st.warning("Digite sua pergunta.")
     elif st.session_state.vectorstore is None:
-        st.error("Nenhum PDF carregado ainda!")
+        st.error("Nenhum PDF carregado.")
     else:
 
-        docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
+        # ============================
+        # MODO 1 — RESUMO
+        # ============================
+        if modo == "📄 Resumo do PDF":
+            docs = st.session_state.vectorstore.similarity_search("", k=20)
+            full_text = " ".join([d.page_content for d in docs])
 
-        # Construir contexto para resposta
-        contexto = ""
-        for d in docs:
-            contexto += f"\n\n--- [PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
+            prompt = f"""
+Faça um RESUMO completo, estruturado e claro do documento abaixo:
 
-        prompt = f"""
-Responda APENAS com base no contexto abaixo. 
-Se não estiver nos PDFs, diga claramente que não há informação suficiente.
+DOCUMENTO:
+{full_text}
 
-### CONTEXTO:
+RESUMO:
+"""
+            resposta = llm.invoke([HumanMessage(content=prompt)])
+            st.subheader("📄 Resumo do PDF")
+            st.write(resposta.content)
+
+        # ============================
+        # MODO 2 — EXPLICAÇÃO
+        # ============================
+        elif modo == "💡 Explicar / Interpretar PDF":
+            docs = st.session_state.vectorstore.similarity_search("", k=20)
+            full_text = " ".join([d.page_content for d in docs])
+
+            prompt = f"""
+Explique o conteúdo do documento abaixo de forma simples, clara e organizada.
+Depois responda à pergunta: {pergunta}
+
+DOCUMENTO:
+{full_text}
+
+EXPLICAÇÃO:
+"""
+            resposta = llm.invoke([HumanMessage(content=prompt)])
+            st.subheader("💡 Explicação do PDF")
+            st.write(resposta.content)
+
+        # ============================
+        # MODO 3 — PERGUNTAS (RAG)
+        # ============================
+        else:
+            docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
+
+            contexto = ""
+            for d in docs:
+                contexto += f"\n\n---[PDF: {d.metadata.get('pdf_name')} ]---\n{d.page_content}"
+
+            prompt = f"""
+Responda APENAS usando o contexto.
+
+CONTEXTO:
 {contexto}
 
-### PERGUNTA:
+PERGUNTA:
 {pergunta}
 
-### RESPOSTA:
+RESPOSTA:
 """
 
-        resposta = llm.invoke([HumanMessage(content=prompt)])
+            resposta = llm.invoke([HumanMessage(content=prompt)])
 
-        # ================
-        # 8) RESPOSTA
-        # ================
-        st.markdown("## 🧠 Resposta")
-        st.write(resposta.content)
+            st.subheader("🧠 Resposta")
+            st.write(resposta.content)
 
-        st.markdown("---")
-        st.markdown("## 📚 Fontes utilizadas:")
+            st.markdown("---")
+            st.subheader("📚 Fontes usadas:")
 
-        # 🔥 AGRUPAR POR PDF (MOSTRA APENAS UMA VEZ)
-        pdf_groups = {}
+            pdf_groups = {}
+            for d in docs:
+                pdf_name = d.metadata.get("pdf_name", "desconhecido")
+                if pdf_name not in pdf_groups:
+                    pdf_groups[pdf_name] = d
 
-        for d in docs:
-            pdf_name = d.metadata.get("pdf_name", "desconhecido")
-            if pdf_name not in pdf_groups:
-                pdf_groups[pdf_name] = d  # guarda apenas o primeiro trecho
+            for pdf_name, d in pdf_groups.items():
+                clean = d.page_content.replace("\n", " ")
 
-        # Exibir sem repetição
-        for pdf_name, d in pdf_groups.items():
-            clean_text = d.page_content.replace("\n", " ")
-
-            st.markdown(f"""
-            **📄 PDF:** {pdf_name}  
-            **Trecho utilizado:**  
-            > {clean_text[:500]}...
-            """)
+                st.markdown(f"""
+                **📄 PDF:** {pdf_name}  
+                > {clean[:500]}...
+                """)
 
