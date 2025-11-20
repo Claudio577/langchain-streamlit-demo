@@ -132,21 +132,27 @@ if uploaded_files:
 
     st.success("PDFs adicionados ao índice com sucesso! 🔥")
 # ============================
-# Botão para limpar PDFs e índice FAISS
+# Botão para limpar TUDO
 # ============================
-st.markdown("### 🗑️ Limpar tudo")
+st.markdown("### 🗑️ Limpar todos os PDFs e reiniciar índice")
 
 if st.button("Apagar todos os PDFs e reiniciar índice"):
     try:
         # Apagar pasta faiss_index inteira
-        import shutil
         shutil.rmtree(FAISS_DIR)
+
+        # Recriar pasta vazia
         os.makedirs(FAISS_DIR, exist_ok=True)
 
         # Resetar memória
         st.session_state.vectorstore = None
 
+        # Mostrar mensagem
         st.success("Todos os PDFs foram apagados e o índice foi reiniciado!")
+
+        # 🔥 Recarregar app imediatamente
+        st.rerun()
+
     except Exception as e:
         st.error(f"Erro ao limpar índice: {e}")
 
