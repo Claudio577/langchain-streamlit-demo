@@ -40,7 +40,7 @@ if st.button("🔄 Resetar memória e apagar todos os PDFs"):
     st.session_state.vectorstore = None
     st.session_state.pdf_list = []
     st.success("Memória limpa! Nenhum PDF carregado.")
-    st.stop()
+    st.rerun()
 
 # -----------------------------------------------------------
 # UPLOAD DE PDFs
