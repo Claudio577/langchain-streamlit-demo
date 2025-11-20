@@ -132,31 +132,33 @@ if uploaded_files:
     add_to_vectorstore(docs)
 
     st.success("PDFs adicionados ao índice com sucesso! 🔥")
-# ============================
-# Botão para limpar TUDO
-# ============================
 st.markdown("### 🗑️ Limpar todos os PDFs e reiniciar índice")
 
 if st.button("Apagar todos os PDFs e reiniciar índice"):
     try:
-        # Apagar pasta faiss_index inteira
+        # Apagar pasta do FAISS
         shutil.rmtree(FAISS_DIR)
-
-        # Recriar pasta vazia
         os.makedirs(FAISS_DIR, exist_ok=True)
 
-        # Resetar memória
+        # Resetar FAISS na memória
         st.session_state.vectorstore = None
 
-        # Mostrar mensagem
+        # Resetar o file_uploader (ESSENCIAL)
+        if "file_uploader" in st.session_state:
+            del st.session_state["file_uploader"]
+
+        # Resetar qualquer outra variável de sessão
+        for key in list(st.session_state.keys()):
+            if "uploaded" in key or "file" in key:
+                del st.session_state[key]
+
         st.success("Todos os PDFs foram apagados e o índice foi reiniciado!")
 
-        # 🔥 Recarregar app imediatamente
+        # Recarregar tudo
         st.rerun()
 
     except Exception as e:
         st.error(f"Erro ao limpar índice: {e}")
-
 
 # ============================
 # 7) Pergunta
