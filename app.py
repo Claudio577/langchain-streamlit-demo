@@ -9,11 +9,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 
-st.title("RAG Multi-PDF + FAISS Persistente + Fontes + LangChain + Streamlit 🚀")
+st.title("RAG Multi-PDF + FAISS Persistente + Fontes + Streamlit 🚀")
 
 
 # ============================
-# 1) Configuração do LLM
+# 1) LLM
 # ============================
 api_key = st.secrets["OPENAI_API_KEY"]
 
@@ -37,7 +37,7 @@ embeddings = load_embeddings()
 
 
 # ============================
-# 3) Diretórios de persistência
+# 3) Persistência FAISS
 # ============================
 FAISS_DIR = "faiss_index"
 os.makedirs(FAISS_DIR, exist_ok=True)
@@ -46,10 +46,8 @@ INDEX_FILE = os.path.join(FAISS_DIR, "index.faiss")
 META_FILE = os.path.join(FAISS_DIR, "index.pkl")
 
 
-# ============================
-# 4) Carregar FAISS salvo
-# ============================
 def load_faiss():
+    """Carrega FAISS salvo, se existir."""
     if not os.path.exists(INDEX_FILE) or not os.path.exists(META_FILE):
         return None
 
@@ -61,7 +59,7 @@ def load_faiss():
             allow_dangerous_deserialization=True
         )
     except Exception as e:
-        st.warning(f"Não foi possível carregar o índice salvo. Ele será recriado. Detalhes: {e}")
+        st.warning("Índice existente não pôde ser carregado. Será recriado.")
         return None
 
 
@@ -69,20 +67,15 @@ if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = load_faiss()
 
 
-# ============================
-# 5) Salvar FAISS
-# ============================
 def save_faiss(store):
-    store.save_local(
-        folder_path=FAISS_DIR,
-        index_name="index"
-    )
+    """Salva FAISS no disco."""
+    store.save_local(folder_path=FAISS_DIR, index_name="index")
     with open(META_FILE, "wb") as f:
         pickle.dump({"info": "faiss metadata"}, f)
 
 
 # ============================
-# 6) Processar PDFs enviados
+# 4) Processar PDFs
 # ============================
 def process_pdfs(files):
     all_docs = []
@@ -101,7 +94,6 @@ def process_pdfs(files):
         )
         chunks = splitter.split_documents(docs)
 
-        # adicionar nome do PDF
         for c in chunks:
             c.metadata["pdf_name"] = uploaded_file.name
 
@@ -111,7 +103,7 @@ def process_pdfs(files):
 
 
 # ============================
-# 7) Adicionar docs ao FAISS
+# 5) Atualizar índice FAISS
 # ============================
 def add_to_vectorstore(docs):
     if st.session_state.vectorstore is None:
@@ -123,7 +115,7 @@ def add_to_vectorstore(docs):
 
 
 # ============================
-# 8) Upload de PDFs
+# 6) Upload PDFs
 # ============================
 uploaded_files = st.file_uploader(
     "Envie um ou vários PDFs:",
@@ -133,17 +125,16 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     st.info("Processando PDFs...")
-
     docs = process_pdfs(uploaded_files)
 
     st.info("Atualizando índice persistente...")
     add_to_vectorstore(docs)
 
-    st.success("PDFs adicionados com sucesso ao índice! 🔥")
+    st.success("PDFs adicionados ao índice com sucesso! 🔥")
 
 
 # ============================
-# 9) Campo de pergunta
+# 7) Pergunta
 # ============================
 pergunta = st.text_input("Faça sua pergunta:")
 
@@ -151,18 +142,19 @@ if st.button("Enviar pergunta"):
     if not pergunta:
         st.warning("Digite uma pergunta.")
     elif st.session_state.vectorstore is None:
-        st.error("Nenhum PDF foi carregado ainda!")
+        st.error("Nenhum PDF carregado ainda!")
     else:
+
         docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
 
-        # Construir contexto para o LLM
+        # Construir contexto para resposta
         contexto = ""
         for d in docs:
             contexto += f"\n\n--- [PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
 
         prompt = f"""
-Responda APENAS com base no contexto abaixo.
-Se não estiver nos PDFs, diga que não há informação suficiente.
+Responda APENAS com base no contexto abaixo. 
+Se não estiver nos PDFs, diga claramente que não há informação suficiente.
 
 ### CONTEXTO:
 {contexto}
@@ -175,10 +167,9 @@ Se não estiver nos PDFs, diga que não há informação suficiente.
 
         resposta = llm.invoke([HumanMessage(content=prompt)])
 
-        # ============================
-        # 10) Exibir resposta formatada + fontes
-        # ============================
-
+        # ================
+        # 8) RESPOSTA
+        # ================
         st.markdown("## 🧠 Resposta")
         st.write(resposta.content)
 
@@ -186,9 +177,11 @@ Se não estiver nos PDFs, diga que não há informação suficiente.
         st.markdown("## 📚 Fontes utilizadas:")
 
         for d in docs:
+            clean_text = d.page_content.replace("\n", " ")
+
             st.markdown(f"""
             **📄 PDF:** {d.metadata.get('pdf_name', 'desconhecido')}  
             **Trecho utilizado:**  
-            > {d.page_content[:500]}...
+            > {clean_text[:500]}...
             """)
 
