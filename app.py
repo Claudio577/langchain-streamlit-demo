@@ -5,6 +5,41 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
+def clean_text_block(text: str) -> str:
+    """
+    Normaliza textos quebrados em várias linhas, juntando palavras
+    e removendo quebras estranhas vindas de PDFs.
+    """
+    lines = text.split("\n")
+    new_lines = []
+    buffer = ""
+
+    for line in lines:
+        line_strip = line.strip()
+
+        # ignora linhas vazias
+        if not line_strip:
+            if buffer:
+                new_lines.append(buffer)
+                buffer = ""
+            continue
+
+        # se a linha é curta, provavelmente faz parte da mesma frase
+        if len(line_strip.split()) <= 3:
+            buffer += " " + line_strip
+        else:
+            # se a linha anterior não terminou frase, junta
+            if buffer and not buffer.endswith((".", "!", "?", ";", ":")):
+                buffer += " " + line_strip
+            else:
+                if buffer:
+                    new_lines.append(buffer)
+                buffer = line_strip
+
+    if buffer:
+        new_lines.append(buffer)
+
+    return "\n".join(new_lines)
 
 # -----------------------------------------------------------
 # TÍTULO
