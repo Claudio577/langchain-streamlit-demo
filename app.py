@@ -255,4 +255,5 @@ RESPOSTA:
                 > {clean[:500]}...
                 """)
 
+pq essa resposta quando eu poerguntei o que o pdf fala
 
