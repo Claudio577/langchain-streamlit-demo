@@ -6,14 +6,11 @@ from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
+
 # ==========================================================
-# FUNÇÃO 1 — REMOVER CABEÇALHOS DO DIÁRIO OFICIAL
+# REMOVER CABEÇALHOS DO DIÁRIO OFICIAL
 # ==========================================================
 def remove_governo_headers(text: str) -> str:
-    """
-    Remove cabeçalhos repetidos do Diário Oficial
-    e assinaturas digitais que aparecem em TODAS as páginas.
-    """
     linhas = text.split("\n")
     novas = []
 
@@ -37,13 +34,9 @@ def remove_governo_headers(text: str) -> str:
 
 
 # ==========================================================
-# FUNÇÃO 2 — NORMALIZAR TEXTO QUEBRADO EM VÁRIAS LINHAS
+# NORMALIZAR TEXTO QUEBRADO
 # ==========================================================
 def clean_text_block(text: str) -> str:
-    """
-    Junta linhas quebradas (como PDFs ruins que quebram palavra por palavra)
-    e monta frases legíveis.
-    """
     lines = text.split("\n")
     new_lines = []
     buffer = ""
@@ -76,7 +69,7 @@ def clean_text_block(text: str) -> str:
 # ==========================================================
 # TÍTULO DO APP
 # ==========================================================
-st.title("📚 RAG Multi-PDF Inteligente – Sem Cabeçalhos Repetidos 🚀")
+st.title("📚 RAG Multi-PDF com Embeddings E5 Base – Muito Mais Preciso 🚀")
 
 
 # ==========================================================
@@ -87,10 +80,10 @@ llm = ChatOpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
 
 
 # ==========================================================
-# EMBEDDINGS
+# EMBEDDINGS (E5 BASE — TOP PARA PT/BR)
 # ==========================================================
 embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
+    model_name="intfloat/multilingual-e5-base"
 )
 
 
@@ -105,14 +98,14 @@ if "pdf_list" not in st.session_state:
 
 
 # ==========================================================
-# BOTÃO DE RESET TOTAL
+# BOTÃO PARA LIMPAR TUDO
 # ==========================================================
 st.markdown("### 🧹 Limpar PDFs carregados")
 
 if st.button("🔄 Resetar memória e apagar todos os PDFs"):
     st.session_state.vectorstore = None
     st.session_state.pdf_list = []
-    st.success("Memória limpa! Nenhum PDF carregado.")
+    st.success("Memória limpa!")
     st.rerun()
 
 
@@ -120,7 +113,7 @@ if st.button("🔄 Resetar memória e apagar todos os PDFs"):
 # UPLOAD DE PDFs
 # ==========================================================
 uploaded_files = st.file_uploader(
-    "Envie PDFs (um ou vários). Sempre será criado um índice novo:",
+    "Envie PDFs (um ou vários). Sempre criará um índice novo:",
     type=["pdf"],
     accept_multiple_files=True
 )
@@ -145,52 +138,52 @@ if uploaded_files:
             chunk_size=800,
             chunk_overlap=120
         )
-
         docs = splitter.split_documents(docs)
 
-        # LIMPAR CABEÇALHOS ANTES DE INDEXAR
+        # Aplicar limpeza ANTES do embedding
         for d in docs:
-            texto = d.page_content
-            texto = remove_governo_headers(texto)
-            d.page_content = texto
+            texto = remove_governo_headers(d.page_content)
+            texto = clean_text_block(texto)
+            d.page_content = "passage: " + texto   # 🔥 necessário para E5
             d.metadata["pdf_name"] = uploaded.name
 
         all_docs.extend(docs)
         st.session_state.pdf_list.append(uploaded.name)
 
     st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
-    st.success("✨ Novo índice criado! PDFs limpos e prontos para perguntas.")
+    st.success("✨ Índice criado com E5 Base! Precisão máxima habilitada.")
 
 
 # ==========================================================
-# PERGUNTA DO USUÁRIO
+# PERGUNTAR AO RAG
 # ==========================================================
-pergunta = st.text_input("🔎 Pergunte algo sobre os PDFs carregados:")
+pergunta = st.text_input("🔎 O que deseja saber sobre os PDFs:")
 
 if st.button("Enviar pergunta"):
     if st.session_state.vectorstore is None:
-        st.error("Nenhum PDF carregado ainda.")
+        st.error("Nenhum PDF carregado.")
     elif not pergunta:
-        st.warning("Digite uma pergunta.")
+        st.warning("Digite algo.")
     else:
-        docs = st.session_state.vectorstore.similarity_search(pergunta, k=8)
 
-        # Montar contexto LIMPO
+        # prefixo obrigatório para E5
+        query = "query: " + pergunta
+
+        docs = st.session_state.vectorstore.similarity_search(query, k=8)
+
         contexto = ""
         for d in docs:
-            texto_limpo = clean_text_block(d.page_content)
-            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name')}] ---\n{texto_limpo}"
+            texto = d.page_content.replace("passage: ", "")
+            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name')}] ---\n{texto}"
 
         prompt = f"""
-Responda SOMENTE com base no contexto abaixo.
+Use SOMENTE esse contexto para responder:
 
-CONTEXTO:
 {contexto}
 
-PERGUNTA:
-{pergunta}
+Pergunta: {pergunta}
 
-RESPOSTA:
+Resposta:
 """
 
         resposta = llm.invoke([HumanMessage(content=prompt)])
@@ -198,20 +191,20 @@ RESPOSTA:
         st.subheader("🧠 Resposta:")
         st.write(resposta.content)
 
-        # ==========================================================
-        # TRECHOS USADOS (LIMPINHOS E SEM DUPLICAÇÃO)
-        # ==========================================================
+        # ---------------------------------------------------------
+        # TRECHOS USADOS
+        # ---------------------------------------------------------
         st.markdown("---")
         st.subheader("📌 Trechos usados:")
 
         shown = set()
         for d in docs:
-            trecho = clean_text_block(d.page_content)
-            chave = trecho.replace("\n", " ")[:300]
+            texto = d.page_content.replace("passage: ", "")
+            chave = texto.replace("\n", " ")[:300]
 
             if chave in shown:
                 continue
             shown.add(chave)
 
             st.write(f"📄 **{d.metadata.get('pdf_name')}**")
-            st.write(trecho[:800] + "...")
+            st.write(texto[:800] + "...")
