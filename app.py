@@ -5,25 +5,25 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import os
 
-st.title("RAG Multi-PDF + LangChain + FAISS + Streamlit 📚🚀")
 
+st.title("RAG Multi-PDF + FAISS Incremental + LangChain + Streamlit 🚀")
+
+
+# ============================
+# 1) Carregar chave da API
+# ============================
 api_key = st.secrets["OPENAI_API_KEY"]
 
-# -----------------------------
-# 1) LLM OpenAI
-# -----------------------------
 llm = ChatOpenAI(
     api_key=api_key,
     model="gpt-4o-mini",
-    temperature=0.2,
+    temperature=0.2
 )
 
-
-# -----------------------------
-# 2) Embeddings locais (rápido & gratuito)
-# -----------------------------
+# ============================
+# 2) Embeddings com cache
+# ============================
 @st.cache_resource
 def load_embeddings():
     return HuggingFaceEmbeddings(
@@ -33,10 +33,15 @@ def load_embeddings():
 embeddings = load_embeddings()
 
 
-# -----------------------------
-# 3) Função para processar PDFs
-# -----------------------------
-@st.cache_resource
+# ============================
+# 3) Estado global do FAISS
+# ============================
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+# ============================
+# 4) Processar PDFs
+# ============================
 def process_pdfs(files):
     all_docs = []
 
@@ -54,7 +59,7 @@ def process_pdfs(files):
         )
         chunks = splitter.split_documents(docs)
 
-        # registrar nome do PDF
+        # Adicionar metadado do nome do pdf
         for c in chunks:
             c.metadata["pdf_name"] = uploaded_file.name
 
@@ -63,9 +68,21 @@ def process_pdfs(files):
     return all_docs
 
 
-# -----------------------------
-# 4) Upload de PDFs
-# -----------------------------
+# ============================
+# 5) Adicionar ao índice FAISS
+# ============================
+def add_to_vectorstore(docs, embeddings):
+    # Se não existe índice, criamos
+    if st.session_state.vectorstore is None:
+        st.session_state.vectorstore = FAISS.from_documents(docs, embeddings)
+    else:
+        # Se já existe, só adicionamos novos docs
+        st.session_state.vectorstore.add_documents(docs)
+
+
+# ============================
+# 6) Upload de PDFs
+# ============================
 uploaded_files = st.file_uploader(
     "Envie um ou vários PDFs:",
     type=["pdf"],
@@ -73,37 +90,36 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    st.success("PDFs carregados! Processando...")
+    st.info("Processando PDFs...")
 
-    # Processar
     docs = process_pdfs(uploaded_files)
 
-    # Montar FAISS
-    st.info("Criando índice vetorial...")
-    vectorstore = FAISS.from_documents(docs, embeddings)
-    st.success("Índice criado! Agora faça sua pergunta abaixo ⬇️")
+    st.info("Adicionando ao índice vetorial...")
+    add_to_vectorstore(docs, embeddings)
 
-    pergunta = st.text_input("Pergunta sobre os PDFs:")
+    st.success("PDFs adicionados ao índice com sucesso!")
 
-    if pergunta:
-        if st.button("Enviar pergunta"):
 
-            # Recuperação via FAISS
-            retrieved_docs = vectorstore.similarity_search(pergunta, k=5)
+# ============================
+# 7) Campo de Pergunta
+# ============================
+pergunta = st.text_input("Faça sua pergunta:")
 
-            # Montar contexto
-            contexto = ""
-            for d in retrieved_docs:
-                contexto += (
-                    f"\n\n--- [PDF: {d.metadata.get('pdf_name')}] ---\n"
-                    f"{d.page_content}"
-                )
+if st.button("Enviar pergunta"):
+    if not pergunta:
+        st.warning("Digite uma pergunta.")
+    elif st.session_state.vectorstore is None:
+        st.error("Nenhum PDF foi carregado ainda!")
+    else:
+        docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
 
-            prompt = f"""
-Você é um assistente especializado em análise de documentos.
+        contexto = ""
+        for d in docs:
+            contexto += f"\n\n--- [PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
 
-Responda APENAS com base nas informações encontradas nos PDFs.
-Se não encontrar a resposta nos documentos, diga explicitamente que não há informação suficiente.
+        prompt = f"""
+Responda APENAS com base no contexto abaixo. 
+Se a resposta não estiver nos PDFs, diga isso claramente.
 
 ### CONTEXTO:
 {contexto}
@@ -114,5 +130,5 @@ Se não encontrar a resposta nos documentos, diga explicitamente que não há in
 ### RESPOSTA:
 """
 
-            resposta = llm.invoke([HumanMessage(content=prompt)])
-            st.write(resposta.content)
+        resposta = llm.invoke([HumanMessage(content=prompt)])
+        st.write(resposta.content)
