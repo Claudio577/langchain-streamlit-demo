@@ -9,7 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 
-st.title("RAG Multi-PDF + FAISS Persistente + Fontes + Streamlit 🚀")
+st.title("RAG Multi-PDF + FAISS Persistente + Fontes por PDF + Streamlit 🚀")
 
 
 # ============================
@@ -58,7 +58,7 @@ def load_faiss():
             index_name="index",
             allow_dangerous_deserialization=True
         )
-    except Exception as e:
+    except Exception:
         st.warning("Índice existente não pôde ser carregado. Será recriado.")
         return None
 
@@ -176,11 +176,20 @@ Se não estiver nos PDFs, diga claramente que não há informação suficiente.
         st.markdown("---")
         st.markdown("## 📚 Fontes utilizadas:")
 
+        # 🔥 AGRUPAR POR PDF (MOSTRA APENAS UMA VEZ)
+        pdf_groups = {}
+
         for d in docs:
+            pdf_name = d.metadata.get("pdf_name", "desconhecido")
+            if pdf_name not in pdf_groups:
+                pdf_groups[pdf_name] = d  # guarda apenas o primeiro trecho
+
+        # Exibir sem repetição
+        for pdf_name, d in pdf_groups.items():
             clean_text = d.page_content.replace("\n", " ")
 
             st.markdown(f"""
-            **📄 PDF:** {d.metadata.get('pdf_name', 'desconhecido')}  
+            **📄 PDF:** {pdf_name}  
             **Trecho utilizado:**  
             > {clean_text[:500]}...
             """)
