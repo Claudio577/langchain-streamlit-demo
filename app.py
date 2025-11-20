@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import pickle
+import shutil
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
