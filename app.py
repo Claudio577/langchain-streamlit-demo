@@ -33,34 +33,63 @@ def load_embeddings():
 embeddings = load_embeddings()
 
 
-# -----------------------------
-# 3) Função para processar PDFs
-# -----------------------------
-@st.cache_resource
-def process_pdfs(files):
-    all_docs = []
+# ============================
+# MODO 3 — PERGUNTAS (RAG)
+# ============================
+else:
+    # 1) Tentar busca normal
+    docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
 
-    for uploaded_file in files:
-        temp_path = f"temp_{uploaded_file.name}"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+    # 2) Se a busca não retornar nada → fallback com busca mais ampla
+    if len(docs) == 0:
+        st.warning("Nenhum trecho relevante encontrado — buscando trecho geral do PDF.")
+        docs = st.session_state.vectorstore.similarity_search("", k=20)
 
-        loader = PyPDFLoader(temp_path)
-        docs = loader.load()
+    # 3) Se ainda assim não houver trechos → erro amigável
+    if len(docs) == 0:
+        st.error("Não foi possível recuperar informações do PDF. Tente outra pergunta.")
+        st.stop()
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=80
-        )
-        chunks = splitter.split_documents(docs)
+    # 4) Monta contexto
+    contexto = ""
+    for d in docs:
+        contexto += f"\n\n---[PDF: {d.metadata.get('pdf_name')}]---\n{d.page_content}"
 
-        # registrar nome do PDF
-        for c in chunks:
-            c.metadata["pdf_name"] = uploaded_file.name
+    # 5) Prompt mais inteligente, sem bloquear resposta
+    prompt = f"""
+Use o contexto abaixo como fonte principal. 
+Se algum trecho estiver incompleto, responda da forma mais útil possível.
 
-        all_docs.extend(chunks)
+CONTEXTO:
+{contexto}
 
-    return all_docs
+PERGUNTA:
+{pergunta}
+
+RESPOSTA (clara, direta e completa):
+"""
+
+    resposta = llm.invoke([HumanMessage(content=prompt)])
+
+    st.subheader("🧠 Resposta")
+    st.write(resposta.content)
+
+    # Mostrar fontes usadas
+    st.markdown("---")
+    st.subheader("📚 Fontes usadas:")
+
+    pdf_groups = {}
+    for d in docs:
+        pdf_name = d.metadata.get("pdf_name", "desconhecido")
+        if pdf_name not in pdf_groups:
+            pdf_groups[pdf_name] = d
+
+    for pdf_name, d in pdf_groups.items():
+        clean = d.page_content.replace("\n", " ")
+        st.markdown(f"""
+        **📄 PDF:** {pdf_name}  
+        > {clean[:500]}...
+        """)
 
 
 # -----------------------------
