@@ -5,6 +5,10 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# ==========================================================
+# FUNÇÃO PARA LIMPAR TEXTO QUEBRADO EM LINHAS DO PDF
+# ==========================================================
 def clean_text_block(text: str) -> str:
     """
     Normaliza textos quebrados em várias linhas, juntando palavras
@@ -17,18 +21,15 @@ def clean_text_block(text: str) -> str:
     for line in lines:
         line_strip = line.strip()
 
-        # ignora linhas vazias
         if not line_strip:
             if buffer:
                 new_lines.append(buffer)
                 buffer = ""
             continue
 
-        # se a linha é curta, provavelmente faz parte da mesma frase
         if len(line_strip.split()) <= 3:
             buffer += " " + line_strip
         else:
-            # se a linha anterior não terminou frase, junta
             if buffer and not buffer.endswith((".", "!", "?", ";", ":")):
                 buffer += " " + line_strip
             else:
@@ -41,34 +42,41 @@ def clean_text_block(text: str) -> str:
 
     return "\n".join(new_lines)
 
-# -----------------------------------------------------------
-# TÍTULO
-# -----------------------------------------------------------
+
+# ==========================================================
+# TÍTULO DO APP
+# ==========================================================
 st.title("📚 RAG Multi-PDF Inteligente – Reinício Automático 🚀")
 
-# -----------------------------------------------------------
-# LLM
-# -----------------------------------------------------------
+
+# ==========================================================
+# LLM (OpenAI)
+# ==========================================================
 api_key = st.secrets["OPENAI_API_KEY"]
 llm = ChatOpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
 
-# -----------------------------------------------------------
-# EMBEDDINGS
-# -----------------------------------------------------------
+
+# ==========================================================
+# EMBEDDINGS (HuggingFace Grátis)
+# ==========================================================
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-# Inicializa área da sessão
+
+# ==========================================================
+# ESTADO DA SESSÃO
+# ==========================================================
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
 
 if "pdf_list" not in st.session_state:
     st.session_state.pdf_list = []
 
-# -----------------------------------------------------------
-# BOTÃO PARA LIMPAR MEMÓRIA
-# -----------------------------------------------------------
+
+# ==========================================================
+# BOTÃO PARA LIMPAR TODO O SISTEMA
+# ==========================================================
 st.markdown("### 🧹 Limpar PDFs carregados")
 
 if st.button("🔄 Resetar memória e apagar todos os PDFs"):
@@ -77,9 +85,10 @@ if st.button("🔄 Resetar memória e apagar todos os PDFs"):
     st.success("Memória limpa! Nenhum PDF carregado.")
     st.rerun()
 
-# -----------------------------------------------------------
+
+# ==========================================================
 # UPLOAD DE PDFs
-# -----------------------------------------------------------
+# ==========================================================
 uploaded_files = st.file_uploader(
     "Envie PDFs (um ou vários). Sempre será criado um índice novo:",
     type=["pdf"],
@@ -89,7 +98,7 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
     all_docs = []
 
-    # SEMPRE RESETAR O ÍNDICE QUANDO ENVIAR NOVOS PDFs
+    # Sempre recriar o índice
     st.session_state.vectorstore = None
     st.session_state.pdf_list = []
 
@@ -115,13 +124,13 @@ if uploaded_files:
         all_docs.extend(docs)
         st.session_state.pdf_list.append(uploaded.name)
 
-    # Criar novo índice FAISS
     st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
     st.success("✨ Novo índice criado! PDFs atuais prontos para perguntas.")
 
-# -----------------------------------------------------------
-# PERGUNTA
-# -----------------------------------------------------------
+
+# ==========================================================
+# PERGUNTA DO USUÁRIO
+# ==========================================================
 pergunta = st.text_input("🔎 Pergunte algo sobre os PDFs carregados:")
 
 if st.button("Enviar pergunta"):
@@ -132,9 +141,11 @@ if st.button("Enviar pergunta"):
     else:
         docs = st.session_state.vectorstore.similarity_search(pergunta, k=8)
 
+        # --------------- Montar contexto ---------------
         contexto = ""
         for d in docs:
-            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
+            texto_limpo = clean_text_block(d.page_content)
+            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name')}] ---\n{texto_limpo}"
 
         prompt = f"""
 Responda SOMENTE com base no contexto abaixo.
@@ -153,13 +164,15 @@ RESPOSTA:
         st.subheader("🧠 Resposta:")
         st.write(resposta.content)
 
-        # TRECHOS USADOS
+        # ==========================================================
+        # TRECHOS USADOS (LIMPOS E SEM DUPLICAÇÃO)
+        # ==========================================================
         st.markdown("---")
         st.subheader("📌 Trechos usados:")
 
         shown = set()
         for d in docs:
-            trecho = d.page_content.strip()
+            trecho = clean_text_block(d.page_content)
             chave = trecho.replace("\n", " ")[:300]
 
             if chave in shown:
@@ -167,4 +180,4 @@ RESPOSTA:
             shown.add(chave)
 
             st.write(f"📄 **{d.metadata.get('pdf_name')}**")
-            st.write(trecho[:500] + "...")
+            st.write(trecho[:800] + "...")
