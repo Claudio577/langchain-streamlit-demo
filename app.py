@@ -11,7 +11,9 @@ from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
+
 st.title("📚 RAG Inteligente PRO — Multi-PDF + Resumo + Explicação + Busca 🔍")
+
 
 # ============================
 # 1) LLM
@@ -24,6 +26,7 @@ llm = ChatOpenAI(
     temperature=0.2
 )
 
+
 # ============================
 # 2) Embeddings
 # ============================
@@ -35,6 +38,7 @@ def load_embeddings():
 
 embeddings = load_embeddings()
 
+
 # ============================
 # 3) Persistência FAISS
 # ============================
@@ -43,6 +47,7 @@ os.makedirs(FAISS_DIR, exist_ok=True)
 
 INDEX_FILE = os.path.join(FAISS_DIR, "index.faiss")
 META_FILE = os.path.join(FAISS_DIR, "index.pkl")
+
 
 def load_faiss():
     if not os.path.exists(INDEX_FILE) or not os.path.exists(META_FILE):
@@ -58,13 +63,16 @@ def load_faiss():
     except Exception:
         return None
 
+
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = load_faiss()
+
 
 def save_faiss(store):
     store.save_local(folder_path=FAISS_DIR, index_name="index")
     with open(META_FILE, "wb") as f:
         pickle.dump({"info": "faiss metadata"}, f)
+
 
 # ============================
 # 4) Botão de limpeza total
@@ -77,6 +85,7 @@ if st.button("Apagar todos os PDFs e reiniciar índice"):
         os.makedirs(FAISS_DIR, exist_ok=True)
 
         st.session_state.vectorstore = None
+
         st.session_state.uploader_key = str(uuid.uuid4())
 
         st.success("Todos os PDFs foram apagados e o índice foi reiniciado!")
@@ -84,6 +93,7 @@ if st.button("Apagar todos os PDFs e reiniciar índice"):
 
     except Exception as e:
         st.error(f"Erro ao limpar índice: {e}")
+
 
 # ============================
 # 5) Processar PDFs
@@ -112,6 +122,7 @@ def process_pdfs(files):
 
     return all_docs
 
+
 # ============================
 # 6) Atualizar FAISS
 # ============================
@@ -122,6 +133,7 @@ def add_to_vectorstore(docs):
         st.session_state.vectorstore.add_documents(docs)
 
     save_faiss(st.session_state.vectorstore)
+
 
 # ============================
 # 7) Upload de PDFs
@@ -141,6 +153,7 @@ if uploaded_files:
     add_to_vectorstore(docs)
 
     st.success("PDFs adicionados com sucesso! 🔥")
+
 
 # ============================
 # 8) UI — Modo Inteligente
@@ -204,22 +217,12 @@ EXPLICAÇÃO:
         else:
             docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
 
-            # FALLBACK SE NENHUM TRECHO FOR ENCONTRADO
-            if len(docs) == 0:
-                st.warning("Nenhum trecho relevante encontrado — buscando trecho geral do PDF.")
-                docs = st.session_state.vectorstore.similarity_search("", k=20)
-
-            if len(docs) == 0:
-                st.error("Não foi possível recuperar informações do PDF. Tente outra pergunta.")
-                st.stop()
-
             contexto = ""
             for d in docs:
-                contexto += f"\n\n---[PDF: {d.metadata.get('pdf_name')}]---\n{d.page_content}"
+                contexto += f"\n\n---[PDF: {d.metadata.get('pdf_name')} ]---\n{d.page_content}"
 
             prompt = f"""
-Use o contexto abaixo como fonte principal.
-Se o contexto estiver incompleto, responda da forma mais útil possível.
+Responda APENAS usando o contexto.
 
 CONTEXTO:
 {contexto}
@@ -251,4 +254,5 @@ RESPOSTA:
                 **📄 PDF:** {pdf_name}  
                 > {clean[:500]}...
                 """)
+
 
