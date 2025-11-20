@@ -69,7 +69,12 @@ def clean_text_block(text: str) -> str:
 # ==========================================================
 # TÍTULO DO APP
 # ==========================================================
-st.title("Sistema inteligente que lê vários PDFs e responde suas perguntas")
+st.title("Sistema de perguntas e respostas em múltiplos PDFs usando IA e LangChain")
+
+st.markdown(
+    "Diferente do ChatGPT comum, este sistema procura as respostas diretamente dentro dos PDFs que você enviar, "
+    "garantindo respostas muito mais precisas e baseadas no conteúdo real dos documentos."
+)
 
 
 # ==========================================================
