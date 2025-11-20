@@ -9,35 +9,44 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 # -----------------------------------------------------------
 # TÍTULO
 # -----------------------------------------------------------
-st.title("📚 RAG Multi-PDF Inteligente – LangChain + Streamlit 🚀")
+st.title("📚 RAG Multi-PDF Inteligente – Reinício Automático 🚀")
 
 # -----------------------------------------------------------
-# LLM (OpenAI)
+# LLM
 # -----------------------------------------------------------
 api_key = st.secrets["OPENAI_API_KEY"]
-
-llm = ChatOpenAI(
-    api_key=api_key,
-    model="gpt-4o-mini",
-    temperature=0
-)
+llm = ChatOpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
 
 # -----------------------------------------------------------
-# EMBEDDINGS (HuggingFace - Grátis)
+# EMBEDDINGS
 # -----------------------------------------------------------
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-# Inicializa storage do FAISS se ainda não existir
+# Inicializa área da sessão
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
+
+if "pdf_list" not in st.session_state:
+    st.session_state.pdf_list = []
+
+# -----------------------------------------------------------
+# BOTÃO PARA LIMPAR MEMÓRIA
+# -----------------------------------------------------------
+st.markdown("### 🧹 Limpar PDFs carregados")
+
+if st.button("🔄 Resetar memória e apagar todos os PDFs"):
+    st.session_state.vectorstore = None
+    st.session_state.pdf_list = []
+    st.success("Memória limpa! Nenhum PDF carregado.")
+    st.stop()
 
 # -----------------------------------------------------------
 # UPLOAD DE PDFs
 # -----------------------------------------------------------
 uploaded_files = st.file_uploader(
-    "Envie PDFs (pode enviar novos a qualquer momento):",
+    "Envie PDFs (um ou vários). Sempre será criado um índice novo:",
     type=["pdf"],
     accept_multiple_files=True
 )
@@ -45,41 +54,40 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
     all_docs = []
 
+    # SEMPRE RESETAR O ÍNDICE QUANDO ENVIAR NOVOS PDFs
+    st.session_state.vectorstore = None
+    st.session_state.pdf_list = []
+
     for uploaded in uploaded_files:
         temp_path = f"temp_{uploaded.name}"
         with open(temp_path, "wb") as f:
             f.write(uploaded.getbuffer())
 
-        st.success(f"📄 {uploaded.name} carregado com sucesso!")
+        st.success(f"📄 {uploaded.name} carregado!")
 
         loader = PyPDFLoader(temp_path)
         docs = loader.load()
 
-        # Chunking
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=800,
             chunk_overlap=120
         )
         docs = splitter.split_documents(docs)
 
-        # Salva o nome do PDF em cada chunk
         for d in docs:
             d.metadata["pdf_name"] = uploaded.name
 
         all_docs.extend(docs)
+        st.session_state.pdf_list.append(uploaded.name)
 
-    # Cria ou atualiza índice FAISS
-    if st.session_state.vectorstore is None:
-        st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
-    else:
-        st.session_state.vectorstore.add_documents(all_docs)
-
-    st.success("✨ Índice atualizado com os novos PDFs!")
+    # Criar novo índice FAISS
+    st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
+    st.success("✨ Novo índice criado! PDFs atuais prontos para perguntas.")
 
 # -----------------------------------------------------------
-# PERGUNTA DO USUÁRIO
+# PERGUNTA
 # -----------------------------------------------------------
-pergunta = st.text_input("🔎 Pergunte algo sobre os PDFs:")
+pergunta = st.text_input("🔎 Pergunte algo sobre os PDFs carregados:")
 
 if st.button("Enviar pergunta"):
     if st.session_state.vectorstore is None:
@@ -87,16 +95,14 @@ if st.button("Enviar pergunta"):
     elif not pergunta:
         st.warning("Digite uma pergunta.")
     else:
-        # Consulta vetorial
-        docs = st.session_state.vectorstore.similarity_search(pergunta, k=6)
+        docs = st.session_state.vectorstore.similarity_search(pergunta, k=8)
 
-        # Construir o contexto
         contexto = ""
         for d in docs:
-            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name', 'desconhecido')}] ---\n{d.page_content}"
+            contexto += f"\n\n[PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
 
         prompt = f"""
-Use SOMENTE o contexto abaixo para responder de forma clara.
+Responda SOMENTE com base no contexto abaixo.
 
 CONTEXTO:
 {contexto}
@@ -109,31 +115,21 @@ RESPOSTA:
 
         resposta = llm.invoke([HumanMessage(content=prompt)])
 
-        # Mostrar resposta
         st.subheader("🧠 Resposta:")
         st.write(resposta.content)
 
-        # -----------------------------------------------------------
-        # TRECHOS USADOS (SEM REPETIÇÕES)
-        # -----------------------------------------------------------
+        # TRECHOS USADOS
         st.markdown("---")
         st.subheader("📌 Trechos usados:")
 
         shown = set()
-
         for d in docs:
             trecho = d.page_content.strip()
+            chave = trecho.replace("\n", " ")[:300]
 
-            # Remover cabeçalhos repetidos
-            if trecho.startswith("Este documento pode ser verificado pelo código"):
+            if chave in shown:
                 continue
-
-            # Detectar duplicatas
-            trecho_comp = trecho.replace("\n", " ").replace("  ", " ")[:300]
-            if trecho_comp in shown:
-                continue
-
-            shown.add(trecho_comp)
+            shown.add(chave)
 
             st.write(f"📄 **{d.metadata.get('pdf_name')}**")
             st.write(trecho[:500] + "...")
