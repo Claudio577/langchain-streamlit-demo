@@ -7,12 +7,42 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # ==========================================================
-# FUNÇÃO PARA LIMPAR TEXTO QUEBRADO EM LINHAS DO PDF
+# FUNÇÃO 1 — REMOVER CABEÇALHOS DO DIÁRIO OFICIAL
+# ==========================================================
+def remove_governo_headers(text: str) -> str:
+    """
+    Remove cabeçalhos repetidos do Diário Oficial
+    e assinaturas digitais que aparecem em TODAS as páginas.
+    """
+    linhas = text.split("\n")
+    novas = []
+
+    for linha in linhas:
+        l = linha.strip()
+
+        if "Este documento pode ser verificado pelo código" in l:
+            continue
+        if "https://www.doe.sp.gov.br/autenticidade" in l:
+            continue
+        if "Documento assinado digitalmente conforme" in l:
+            continue
+        if "ICP-Brasil" in l:
+            continue
+        if "/24" in l and "autenticidade" in l:
+            continue
+
+        novas.append(linha)
+
+    return "\n".join(novas)
+
+
+# ==========================================================
+# FUNÇÃO 2 — NORMALIZAR TEXTO QUEBRADO EM VÁRIAS LINHAS
 # ==========================================================
 def clean_text_block(text: str) -> str:
     """
-    Normaliza textos quebrados em várias linhas, juntando palavras
-    e removendo quebras estranhas vindas de PDFs.
+    Junta linhas quebradas (como PDFs ruins que quebram palavra por palavra)
+    e monta frases legíveis.
     """
     lines = text.split("\n")
     new_lines = []
@@ -46,18 +76,18 @@ def clean_text_block(text: str) -> str:
 # ==========================================================
 # TÍTULO DO APP
 # ==========================================================
-st.title("📚 RAG Multi-PDF Inteligente – Reinício Automático 🚀")
+st.title("📚 RAG Multi-PDF Inteligente – Sem Cabeçalhos Repetidos 🚀")
 
 
 # ==========================================================
-# LLM (OpenAI)
+# LLM
 # ==========================================================
 api_key = st.secrets["OPENAI_API_KEY"]
 llm = ChatOpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
 
 
 # ==========================================================
-# EMBEDDINGS (HuggingFace Grátis)
+# EMBEDDINGS
 # ==========================================================
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -65,7 +95,7 @@ embeddings = HuggingFaceEmbeddings(
 
 
 # ==========================================================
-# ESTADO DA SESSÃO
+# ESTADOS DA SESSÃO
 # ==========================================================
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
@@ -75,7 +105,7 @@ if "pdf_list" not in st.session_state:
 
 
 # ==========================================================
-# BOTÃO PARA LIMPAR TODO O SISTEMA
+# BOTÃO DE RESET TOTAL
 # ==========================================================
 st.markdown("### 🧹 Limpar PDFs carregados")
 
@@ -98,7 +128,6 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
     all_docs = []
 
-    # Sempre recriar o índice
     st.session_state.vectorstore = None
     st.session_state.pdf_list = []
 
@@ -116,16 +145,21 @@ if uploaded_files:
             chunk_size=800,
             chunk_overlap=120
         )
+
         docs = splitter.split_documents(docs)
 
+        # LIMPAR CABEÇALHOS ANTES DE INDEXAR
         for d in docs:
+            texto = d.page_content
+            texto = remove_governo_headers(texto)
+            d.page_content = texto
             d.metadata["pdf_name"] = uploaded.name
 
         all_docs.extend(docs)
         st.session_state.pdf_list.append(uploaded.name)
 
     st.session_state.vectorstore = FAISS.from_documents(all_docs, embeddings)
-    st.success("✨ Novo índice criado! PDFs atuais prontos para perguntas.")
+    st.success("✨ Novo índice criado! PDFs limpos e prontos para perguntas.")
 
 
 # ==========================================================
@@ -141,7 +175,7 @@ if st.button("Enviar pergunta"):
     else:
         docs = st.session_state.vectorstore.similarity_search(pergunta, k=8)
 
-        # --------------- Montar contexto ---------------
+        # Montar contexto LIMPO
         contexto = ""
         for d in docs:
             texto_limpo = clean_text_block(d.page_content)
@@ -165,7 +199,7 @@ RESPOSTA:
         st.write(resposta.content)
 
         # ==========================================================
-        # TRECHOS USADOS (LIMPOS E SEM DUPLICAÇÃO)
+        # TRECHOS USADOS (LIMPINHOS E SEM DUPLICAÇÃO)
         # ==========================================================
         st.markdown("---")
         st.subheader("📌 Trechos usados:")
