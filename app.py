@@ -69,7 +69,7 @@ def clean_text_block(text: str) -> str:
 # ==========================================================
 # TÍTULO DO APP
 # ==========================================================
-st.title("📚 RAG Multi-PDF com Embeddings E5 Base – Muito Mais Preciso 🚀")
+st.title("Sistema inteligente que lê vários PDFs e responde suas perguntas")
 
 
 # ==========================================================
