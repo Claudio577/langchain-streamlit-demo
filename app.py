@@ -1,15 +1,16 @@
 import streamlit as st
 import os
+import pickle
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import pickle
 
 
-st.title("RAG Multi-PDF + FAISS Persistente + LangChain + Streamlit 🚀")
+st.title("RAG Multi-PDF + FAISS Persistente + Fontes + LangChain + Streamlit 🚀")
+
 
 # ============================
 # 1) Configuração do LLM
@@ -19,12 +20,12 @@ api_key = st.secrets["OPENAI_API_KEY"]
 llm = ChatOpenAI(
     api_key=api_key,
     model="gpt-4o-mini",
-    temperature=0.2,
+    temperature=0.2
 )
 
 
 # ============================
-# 2) Embeddings com cache
+# 2) Embeddings
 # ============================
 @st.cache_resource
 def load_embeddings():
@@ -36,28 +37,32 @@ embeddings = load_embeddings()
 
 
 # ============================
-# 3) Caminhos de persistência
+# 3) Diretórios de persistência
 # ============================
 FAISS_DIR = "faiss_index"
-FAISS_PATH = os.path.join(FAISS_DIR, "index.faiss")
-FAISS_META = os.path.join(FAISS_DIR, "index.pkl")
-
 os.makedirs(FAISS_DIR, exist_ok=True)
 
+INDEX_FILE = os.path.join(FAISS_DIR, "index.faiss")
+META_FILE = os.path.join(FAISS_DIR, "index.pkl")
+
 
 # ============================
-# 4) Carregar índice salvo (se existir)
+# 4) Carregar FAISS salvo
 # ============================
 def load_faiss():
-    if os.path.exists(FAISS_PATH) and os.path.exists(FAISS_META):
-        with open(FAISS_META, "rb") as f:
-            metadata = pickle.load(f)
+    if not os.path.exists(INDEX_FILE) or not os.path.exists(META_FILE):
+        return None
+
+    try:
         return FAISS.load_local(
             folder_path=FAISS_DIR,
             embeddings=embeddings,
-            index_name="index"
+            index_name="index",
+            allow_dangerous_deserialization=True
         )
-    return None
+    except Exception as e:
+        st.warning(f"Não foi possível carregar o índice salvo. Ele será recriado. Detalhes: {e}")
+        return None
 
 
 if "vectorstore" not in st.session_state:
@@ -65,20 +70,19 @@ if "vectorstore" not in st.session_state:
 
 
 # ============================
-# 5) Salvar FAISS no disco
+# 5) Salvar FAISS
 # ============================
-def save_faiss(vectorstore):
-    vectorstore.save_local(
+def save_faiss(store):
+    store.save_local(
         folder_path=FAISS_DIR,
         index_name="index"
     )
-    # salvar metadados
-    with open(FAISS_META, "wb") as f:
-        pickle.dump({"info": "faiss-metadata"}, f)
+    with open(META_FILE, "wb") as f:
+        pickle.dump({"info": "faiss metadata"}, f)
 
 
 # ============================
-# 6) Processamento de PDFs
+# 6) Processar PDFs enviados
 # ============================
 def process_pdfs(files):
     all_docs = []
@@ -97,6 +101,7 @@ def process_pdfs(files):
         )
         chunks = splitter.split_documents(docs)
 
+        # adicionar nome do PDF
         for c in chunks:
             c.metadata["pdf_name"] = uploaded_file.name
 
@@ -106,7 +111,7 @@ def process_pdfs(files):
 
 
 # ============================
-# 7) Adicionar PDFs ao índice
+# 7) Adicionar docs ao FAISS
 # ============================
 def add_to_vectorstore(docs):
     if st.session_state.vectorstore is None:
@@ -114,7 +119,6 @@ def add_to_vectorstore(docs):
     else:
         st.session_state.vectorstore.add_documents(docs)
 
-    # Persistência
     save_faiss(st.session_state.vectorstore)
 
 
@@ -135,11 +139,11 @@ if uploaded_files:
     st.info("Atualizando índice persistente...")
     add_to_vectorstore(docs)
 
-    st.success("PDFs salvos e índice atualizado com sucesso! 🔥")
+    st.success("PDFs adicionados com sucesso ao índice! 🔥")
 
 
 # ============================
-# 9) Perguntas
+# 9) Campo de pergunta
 # ============================
 pergunta = st.text_input("Faça sua pergunta:")
 
@@ -151,13 +155,14 @@ if st.button("Enviar pergunta"):
     else:
         docs = st.session_state.vectorstore.similarity_search(pergunta, k=5)
 
+        # Construir contexto para o LLM
         contexto = ""
         for d in docs:
             contexto += f"\n\n--- [PDF: {d.metadata.get('pdf_name')}] ---\n{d.page_content}"
 
         prompt = f"""
-Responda APENAS com base no contexto abaixo. 
-Se a resposta não estiver nos PDFs, diga isso claramente.
+Responda APENAS com base no contexto abaixo.
+Se não estiver nos PDFs, diga que não há informação suficiente.
 
 ### CONTEXTO:
 {contexto}
@@ -169,4 +174,21 @@ Se a resposta não estiver nos PDFs, diga isso claramente.
 """
 
         resposta = llm.invoke([HumanMessage(content=prompt)])
+
+        # ============================
+        # 10) Exibir resposta formatada + fontes
+        # ============================
+
+        st.markdown("## 🧠 Resposta")
         st.write(resposta.content)
+
+        st.markdown("---")
+        st.markdown("## 📚 Fontes utilizadas:")
+
+        for d in docs:
+            st.markdown(f"""
+            **📄 PDF:** {d.metadata.get('pdf_name', 'desconhecido')}  
+            **Trecho utilizado:**  
+            > {d.page_content[:500]}...
+            """)
+
